@@ -12,7 +12,6 @@ import os
 
 class PassDB:
 
-    _valid_init_fields = ["data", "path", "password", "settings"]
     version = "Version 0.0.1"
     settings: dict
     data: pandas.DataFrame
@@ -49,7 +48,7 @@ class PassDB:
         path: str = None,
         settings: dict = dict(),
     ):
-
+        self.pending_changes = False
         self.data = data
         self.path = path
 
@@ -83,7 +82,6 @@ class PassDB:
             )
             del decrypted_password
             self.data.loc[index] = (
-                index,
                 entry["account"],
                 entry["hostname"],
                 new_password_salt,
@@ -94,6 +92,14 @@ class PassDB:
             )
         self.settings["salt"] = new_salt
         self.pending_changes = True
+
+    @classmethod
+    def read_file(cls, path, password):
+        result = None
+        with open(path) as file:
+            raw = file.read()
+            result = cls.open_db(raw, password)
+        return result
 
     @classmethod
     def open_db(cls, raw, password):
@@ -161,7 +167,7 @@ class PassDB:
                     )
                 ).decode("utf-8")
         except UnicodeDecodeError:
-            raise ValueError("Incorrect Password")
+            raise ValueError("Unable to decrypt")
 
     @classmethod
     def _pad(cls, s):
