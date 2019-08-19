@@ -9,22 +9,31 @@ from io import StringIO
 import datetime
 import os
 
+__version__ = '0.0.1'
 
 class PassDB:
 
-    version = "Version 0.0.1"
     settings: dict
     data: pandas.DataFrame
     _default_settings = {
         "salt_size": 64,
         "block_size": 32,  # Using AES256
-        "enc_sample_content": "The provided password is correct",
         "salt": None,
         "path": None,
-        "hash_depth": 9,
+        "hashDepth": 9,
     }
-
-    _format = """### PYPASSMAN {version} ###
+    __user_col = "username"
+    __site_col = "hostname"
+    __column_names = [
+        __user_col,
+        __site_col,
+        "salt",
+        "password",
+        "hashDepth",
+        "dateModified",
+        "dateCreated",
+    ]
+    _format = """### PYPASSMAN Version {version} ###
 {settings}
 ### CHECKSUM ###
 {checksum}
@@ -34,20 +43,16 @@ class PassDB:
 
     def __init__(
         self,
-        data: pandas.DataFrame = pandas.DataFrame(
-            columns=[
-                "account",
-                "hostname",
-                "salt",
-                "password",
-                "hash_depth",
-                "dateModified",
-                "dateCreated",
-            ]
-        ),
+        data: pandas.DataFrame=None,
         path: str = None,
         settings: dict = dict(),
     ):
+        if data is None:
+            data = pandas.DataFrame = pandas.DataFrame(
+                columns=self.__column_names
+            )
+        else:
+            self.validate_data_shape(data)
         self.pending_changes = False
         self.data = data
         self.path = path
@@ -72,21 +77,21 @@ class PassDB:
                 entry["password"],
                 self.settings["salt"],
                 entry["salt"],
-                entry["hash_depth"],
+                entry["hashDepth"],
             )
             encrypted_password = self._encrypt(
                 decrypted_password,
                 new_salt,
                 new_password_salt,
-                self.settings["hash_depth"],
+                self.settings["hashDepth"],
             )
             del decrypted_password
             self.data.loc[index] = (
-                entry["account"],
-                entry["hostname"],
+                entry[self.__user_col],
+                entry[self.__site_col],
                 new_password_salt,
                 encrypted_password,
-                self.settings["hash_depth"],
+                self.settings["hashDepth"],
                 str(datetime.datetime.utcnow().isoformat()),
                 entry["dateCreated"],
             )
@@ -94,11 +99,16 @@ class PassDB:
         self.pending_changes = True
 
     @classmethod
+    def validate_data_shape(cls, data):
+        pass
+
+    @classmethod
     def read_file(cls, path, password):
         result = None
         with open(path) as file:
             raw = file.read()
             result = cls.open_db(raw, password)
+            result.path = path
         return result
 
     @classmethod
@@ -109,7 +119,7 @@ class PassDB:
         settings = json.loads(settings_json)
         checksum = base64.b64decode(checksum)
         data_csv = cls._decrypt(
-            data_csv, password, settings["salt"], settings["hash_depth"]
+            data_csv, password, settings["salt"], settings["hashDepth"]
         )
         checksum_calc = hashlib.sha256(
             str(data_csv + settings_json).encode("utf-8")
@@ -124,7 +134,6 @@ class PassDB:
         path = os.path.realpath(path)
         settings_cp = self.settings.copy()
         settings_cp["path"] = path
-
         new_dict = self.__class__(
             data=self.data,
             path=path,
@@ -140,25 +149,31 @@ class PassDB:
         self.pending_changes = False
 
     @classmethod
-    def _encrypt(cls, raw, password, salt, hash_depth):
+    def _deep_hash_digest(cls, key, salt, hashDepth):
+        output = key
+        hash_count = 0
+        while hash_count < hashDepth:
+            output = hashlib.sha256(output + salt).digest()
+            hash_count += 1
+        return output
+
+    @classmethod
+    def _encrypt(cls, raw, password, salt, hashDepth):
         raw = cls._pad(raw)
         iv = Random.new().read(AES.block_size)
         salt = base64.b64decode(salt)
         key = hashlib.sha256(str(password).encode() + salt).digest()
-        for i in range(hash_depth):
-            key = hashlib.sha256(key + salt).digest()
+        key = cls._deep_hash_digest(key, salt, hashDepth)
         cipher = AES.new(key, AES.MODE_CBC, iv)
         return base64.b64encode(iv + cipher.encrypt(raw)).decode("utf-8")
 
     @classmethod
-    def _decrypt(cls, enc, password, salt, hash_depth):
+    def _decrypt(cls, enc, password, salt, hashDepth):
         enc = base64.b64decode(enc)
         iv = enc[: AES.block_size]
         salt = base64.b64decode(salt)
         key = hashlib.sha256(password.encode() + salt).digest()
-        for i in range(hash_depth):
-            key = hashlib.sha256(key + salt).digest()
-
+        key = cls._deep_hash_digest(key, salt, hashDepth)
         cipher = AES.new(key, AES.MODE_CBC, iv)
         try:
             return cls._unpad(
@@ -179,7 +194,7 @@ class PassDB:
         return s[: -ord(s[len(s) - 1:])]
 
     def enc_str(self, password):
-        data_csv = self.data.to_csv(index_label="index")
+        data_csv = self.data.to_csv(index=False)
         settings_json = json.dumps(self.settings)
         checksum = base64.b64encode(
             hashlib.sha256(
@@ -191,10 +206,10 @@ class PassDB:
             data_csv,
             password,
             self.settings["salt"],
-            self.settings["hash_depth"]
+            self.settings["hashDepth"]
         )
         return self._format.format(
-            version=str(self.version),
+            version=__version__,
             checksum=checksum,
             settings=settings_json,
             data=enc_data,
@@ -214,37 +229,12 @@ class PassDB:
             else "",
         )
 
-    def set_entry(self, *args):
-        account, hostname, password = None, None, None
-        if len(args) == 1:
-            account, hostname_password = args[0].split("@")
-            hostname, password, other = hostname_password.split(":")
-        elif len(args) == 2:
-            account_hostname, password = args
-            account, hostname = account_hostname.split("@")
-        elif len(args) == 3:
-            account, hostname, password = args
-        else:
-            raise ValueError(
-                """
-PassDB.set_entry :: Too many arguments
-    usage(1): get_password(account, hostname, password)
-    usage(2): get_password("{account}@{hostname}", password)
-    usage(3): get_password("{account}@{hostname}:{password}") """
-            )
-
-        for char in (":", "@"):
-            for item in account, hostname, password:
-                if char in item:
-                    raise ValueError(
-                        """
-account, hostname, and password cannot contain colon (:) or at symbol (@)"""
-                    )
-
+    def set_entry(self, account, hostname, password):
         if len(self.data) > 0:
+            entry_recorded = False
             for index, entry in self.data.iterrows():
-                if (entry["account"] == account and
-                        entry["hostname"] == hostname):
+                if (entry[self.__user_col] == account and
+                        entry[self.__site_col] == hostname):
                     salt = base64.b64encode(
                         Random.new().read(self.settings["salt_size"])
                     ).decode("utf-8")
@@ -252,17 +242,36 @@ account, hostname, and password cannot contain colon (:) or at symbol (@)"""
                         password,
                         self.settings["salt"],
                         salt,
-                        self.settings["hash_depth"],
+                        self.settings["hashDepth"],
                     )
                     self.data.loc[index] = (
                         account,
                         hostname,
                         salt,
                         password,
-                        self.settings["hash_depth"],
+                        self.settings["hashDepth"],
                         str(datetime.datetime.utcnow().isoformat()),
                         str(datetime.datetime.utcnow().isoformat()),
                     )
+            if not entry_recorded: # append, if not found in database
+                salt = base64.b64encode(
+                        Random.new().read(self.settings["salt_size"])
+                    ).decode("utf-8")
+                password = self._encrypt(
+                    password,
+                    self.settings["salt"],
+                    salt,
+                    self.settings["hashDepth"],
+                )
+                self.data = self.data.append({
+                    self.__column_names[0]:account,
+                    self.__column_names[1]:hostname,
+                    self.__column_names[2]:salt,
+                    self.__column_names[3]:password,
+                    self.__column_names[4]:self.settings["hashDepth"],
+                    self.__column_names[5]:str(datetime.datetime.utcnow().isoformat()),
+                    self.__column_names[6]:str(datetime.datetime.utcnow().isoformat()),
+                }, ignore_index=True)
         else:
             salt = base64.b64encode(
                 Random.new().read(self.settings["salt_size"])
@@ -271,61 +280,45 @@ account, hostname, and password cannot contain colon (:) or at symbol (@)"""
                 password,
                 self.settings["salt"],
                 salt,
-                self.settings["hash_depth"]
+                self.settings["hashDepth"]
             )
             self.data.loc[0] = (
                 account,
                 hostname,
                 salt,
                 password,
-                self.settings["hash_depth"],
+                self.settings["hashDepth"],
                 str(datetime.datetime.utcnow().isoformat()),
                 str(datetime.datetime.utcnow().isoformat()),
             )
 
         self.pending_changes = True
 
-    def get_entry(self, *args):
-        if len(args) == 1:
-            account, hostname = args[0].split("@")
-        elif len(args) == 2:
-            account, hostname = args
-        else:
-            raise ValueError(
-                """
-PassDB.get_entry :: Too many arguments
-    usage(1): get_entry(account, hostname)
-    usage(2): get_entry("{account}@{hostname}")"""
-            )
+    def get_entry(self, account, hostname):
         if (len(self.data)) == 0:
             return None
-        for index, entry in self.data.iterrows():
-            if entry["account"] == account and entry["hostname"] == hostname:
-                return entry
+        for entry in self.data.iterrows():
+            if entry[1]["username"] == account and entry[1]["hostname"] == hostname:
+                return entry[1]
         return None
 
-    def get_password(self, *args):
-        if len(args) == 1:
-            account, hostname = args[0].split("@")
-        elif len(args) == 2:
-            account, hostname = args
-        else:
-            raise ValueError(
-                """
-PassDB.get_password :: Too many arguments
-    usage(1): get_password(account, hostname)
-    usage(2): get_password("{account}@{hostname}")"""
-            )
+    def search(self, filters):
+        search_results = self.data.copy()
+        for filter in filters:
+            search_results = search_results.loc[search_results[filter[0]].str.contains(filter[1])]
+        return search_results.filter(["username", "hostname", "dateModified"])
 
+    def get_password(self, account, hostname):
         entry = self.get_entry(account, hostname)
-        if isinstance(entry["password"], str):
+        if entry and isinstance(entry["password"], str):
             return self._decrypt(
                 entry["password"],
                 self.settings["salt"],
                 entry["salt"],
-                entry["hash_depth"],
+                entry["hashDepth"],
             )
         raise ValueError(
             "Password for {account}@{hostname} in \
-                unexpected format".format(**entry)
+                unexpected data type".format(**entry)
         )
+
