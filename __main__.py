@@ -2,7 +2,6 @@ import sys
 import argparse
 import interactions
 
-
 parser = argparse.ArgumentParser(
     description="Interact with a pypassman Password Database", 
     prog="pypassman")

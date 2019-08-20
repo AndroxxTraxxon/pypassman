@@ -1,0 +1,115 @@
+[
+  {
+    "name": "define",
+    "properties": {
+      "help": "Define a new user account",
+      "aliases": [
+        "d",
+        "def"
+      ]
+    },
+    "arguments":[
+      {
+        "name":"hostname",
+        "properties":{
+          "help": "The url or name of the host where the account resides."
+        }
+      },
+      {
+        "name":"username",
+        "properties":{
+          "help":"The username of the account, what is typed in for login."
+        }
+      },
+      {
+        "name":"-userp, --userpass, --acctpass",
+        "properties":{
+          "help":"Password to be added to the database",
+          "metavar":"ACCOUNT_PASS",
+          "dest":"accountpass"
+        }
+      }
+    ]
+  },
+  {
+    "name":"query",
+    "properties": {
+      "help": "Search for a username or password",
+      "aliases":["q"]
+    },
+    "arguments":[
+      {
+        "name":"-s, --site, --host, --hostname",
+        "properties":{
+          "help":"The url or name of the host where the account resides.",
+          "metavar":"HOSTNAME",
+          "dest":"hostname"
+        }
+      },
+      {
+        "name":"-u, --user, --username", 
+        "properties":{
+          "help":"The username of the account, what is typed in for login.",
+          "metavar":"USERNAME",
+          "dest":"username"
+        }
+      }
+    ]
+  },
+  {
+    "name": "update",
+    "properties":{
+      "help": "Update a password for an existing user account",
+      "aliases": [
+        "u",
+        "up"
+      ]
+    },
+    "arguments":[
+      {
+        "name":"hostname",
+        "properties":{
+          "help": "The url or name of the host where the account resides."
+        }
+      },
+      {
+        "name":"username",
+        "properties":{
+          "help":"The username of the account, what is typed in for login."
+        }
+      },
+      {
+        "name":"-userp, --userpass, --acctpass",
+        "properties":{
+          "help":"Password to be added to the database",
+          "metavar":"ACCOUNT_PASS",
+          "dest":"accountpass"
+        }
+      }
+    ]
+  },
+  {
+    "name": "save",
+    "properties":{
+      "help": "Save the database"
+    },
+    "arguments":[
+      {
+        "name":"-d, --dest, --destination",
+        "properties":{
+          "help": "The destination file path for the database file.",
+          "metavar": "FILEPATH",
+          "dest":"filepath"
+        }
+      },
+      {
+        "name":"-p, --password, --masterpass",
+        "properties":{
+          "help":"Password with which to encrypt the database.",
+          "metavar":"MASTERPASS",
+          "dest":"masterpass"
+        }
+      }
+    ]
+  }
+]
