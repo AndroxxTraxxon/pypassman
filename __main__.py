@@ -44,6 +44,12 @@ commands["init"].add_argument("-p, --pass",
     metavar="PASSWORD",
     dest='masterpass'
     )
+commands["init"].add_argument("-f, --force-override",
+    help="Force override the file, if there is already one that exists.",
+    action='store_true',
+    dest='force',
+    default=False
+)
 commands['init'].set_defaults(func=interactions.init)
 
 # SESSION COMMAND ARGUMENTS

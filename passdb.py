@@ -1,20 +1,21 @@
 import base64
 import hashlib
-import pandas
+import csv
 from Crypto import Random
 from Crypto.Cipher import AES
 import json
 import re
-from io import StringIO
 import datetime
 import os
+from io import StringIO
+from typing import Iterable
 
 __version__ = '0.0.1'
 
 class PassDB:
 
     settings: dict
-    data: pandas.DataFrame
+    data: list
     _default_settings = {
         "salt_size": 64,
         "block_size": 32,  # Using AES256
@@ -22,17 +23,18 @@ class PassDB:
         "path": None,
         "hashDepth": 9,
     }
-    __user_col = "username"
-    __site_col = "hostname"
-    __column_names = [
-        __user_col,
-        __site_col,
-        "salt",
-        "password",
-        "hashDepth",
-        "dateModified",
-        "dateCreated",
-    ]
+    _cols = {
+        "user"  : "username",
+        "host"  : "hostname",
+        "salt"  : "salt",
+        "pass"  : "password",
+        "grp"   : "group",
+        "depth" : "hashDepth",
+        "mod"   : "dateModified",
+        "create": "dateCreated",
+        "sum"   : "checksum",
+    }
+    
     _format = """### PYPASSMAN Version {version} ###
 {settings}
 ### CHECKSUM ###
@@ -43,22 +45,21 @@ class PassDB:
 
     def __init__(
         self,
-        data: pandas.DataFrame=None,
+        data: list = None,
         path: str = None,
-        settings: dict = dict(),
+        settings: dict = None,
     ):
         if data is None:
-            data = pandas.DataFrame = pandas.DataFrame(
-                columns=self.__column_names
-            )
+            data = list()
         else:
             self.validate_data_shape(data)
         self.pending_changes = False
         self.data = data
-        self.path = path
+        self.path = os.path.expanduser(path or '')
 
         self.settings = self._default_settings.copy()
-        self.settings.update(settings)
+        if settings:
+            self.settings.update(settings)
         if self.settings.get("salt") is None:
             self.settings["salt"] = base64.b64encode(
                 Random.new().read(self.settings["salt_size"])
@@ -69,7 +70,7 @@ class PassDB:
             Random.new().read(self.settings["salt_size"])
         ).decode("utf-8")
 
-        for index, entry in self.data.iterrows():
+        for index, entry in enumerate(self.data):
             new_password_salt = base64.b64encode(
                 Random.new().read(self.settings["salt_size"])
             ).decode("utf-8")
@@ -86,15 +87,18 @@ class PassDB:
                 self.settings["hashDepth"],
             )
             del decrypted_password
-            self.data.loc[index] = (
-                entry[self.__user_col],
-                entry[self.__site_col],
-                new_password_salt,
-                encrypted_password,
-                self.settings["hashDepth"],
-                str(datetime.datetime.utcnow().isoformat()),
-                entry["dateCreated"],
-            )
+            self.data[index] = {
+                self._cols["user"]: entry[self._cols["user"]],
+                self._cols["host"]: entry[self._cols["host"]],
+                self._cols["salt"]: new_password_salt,
+                self._cols["pass"]: encrypted_password,
+                self._cols["depth"]: self.settings["hashDepth"],
+                self._cols["mod"]: str(datetime.datetime.utcnow().isoformat()),
+                self._cols["create"]: entry[self._cols["create"]],
+            }
+            self.data[index][self._cols["sum"]] = hashlib.sha256(
+                str(self.data[index]).encode('utf-8')
+            ).digest()
         self.settings["salt"] = new_salt
         self.pending_changes = True
 
@@ -127,11 +131,14 @@ class PassDB:
         del settings_json
         if not checksum == checksum_calc:
             raise ValueError("Checksum does not match data.")
-        data = pandas.read_csv(StringIO(data_csv))
+        data = []
+        for row in csv.DictReader(StringIO(data_csv)):
+            row[cls._cols['depth']] = int(row[cls._cols['depth']])
+            data.append(row)
         return cls(settings=settings, data=data)
 
     def save_as(self, path, password):
-        path = os.path.realpath(path)
+        path = os.path.realpath(os.path.expanduser(path))
         settings_cp = self.settings.copy()
         settings_cp["path"] = path
         new_dict = self.__class__(
@@ -144,6 +151,8 @@ class PassDB:
         return new_dict
 
     def save(self, password):
+        if not os.path.exists(os.path.dirname(self.path)):
+            os.makedirs(os.path.dirname(self.path))
         with open(self.path, "w+") as dest:
             dest.write(self.enc_str(password))
         self.pending_changes = False
@@ -187,14 +196,20 @@ class PassDB:
     @classmethod
     def _pad(cls, s):
         bs = cls._default_settings["block_size"]
-        return s + (bs - len(s) % bs) * chr(bs - len(s) % bs)
+        return bytes(s + (bs - len(s) % bs) * chr(bs - len(s) % bs), 'utf-8')
 
-    @staticmethod
-    def _unpad(s):
+    @classmethod
+    def _unpad(cls, s):
         return s[: -ord(s[len(s) - 1:])]
 
     def enc_str(self, password):
-        data_csv = self.data.to_csv(index=False)
+        data_csv = ''
+        with StringIO() as tmp_io:
+            fieldNames = self._cols.values()
+            writer = csv.DictWriter(tmp_io, fieldNames)
+            writer.writeheader()
+            writer.writerows(self.data)
+            data_csv = tmp_io.getvalue()
         settings_json = json.dumps(self.settings)
         checksum = base64.b64encode(
             hashlib.sha256(
@@ -230,85 +245,62 @@ class PassDB:
         )
 
     def set_entry(self, account, hostname, password):
-        if len(self.data) > 0:
-            entry_recorded = False
-            for index, entry in self.data.iterrows():
-                if (entry[self.__user_col] == account and
-                        entry[self.__site_col] == hostname):
-                    salt = base64.b64encode(
-                        Random.new().read(self.settings["salt_size"])
-                    ).decode("utf-8")
-                    password = self._encrypt(
-                        password,
-                        self.settings["salt"],
-                        salt,
-                        self.settings["hashDepth"],
-                    )
-                    self.data.loc[index] = (
-                        account,
-                        hostname,
-                        salt,
-                        password,
-                        self.settings["hashDepth"],
-                        str(datetime.datetime.utcnow().isoformat()),
-                        str(datetime.datetime.utcnow().isoformat()),
-                    )
-            if not entry_recorded: # append, if not found in database
-                salt = base64.b64encode(
-                        Random.new().read(self.settings["salt_size"])
-                    ).decode("utf-8")
-                password = self._encrypt(
-                    password,
-                    self.settings["salt"],
-                    salt,
-                    self.settings["hashDepth"],
-                )
-                self.data = self.data.append({
-                    self.__column_names[0]:account,
-                    self.__column_names[1]:hostname,
-                    self.__column_names[2]:salt,
-                    self.__column_names[3]:password,
-                    self.__column_names[4]:self.settings["hashDepth"],
-                    self.__column_names[5]:str(datetime.datetime.utcnow().isoformat()),
-                    self.__column_names[6]:str(datetime.datetime.utcnow().isoformat()),
-                }, ignore_index=True)
-        else:
-            salt = base64.b64encode(
-                Random.new().read(self.settings["salt_size"])
-            ).decode("utf-8")
-            password = self._encrypt(
-                password,
-                self.settings["salt"],
-                salt,
-                self.settings["hashDepth"]
-            )
-            self.data.loc[0] = (
-                account,
-                hostname,
-                salt,
-                password,
-                self.settings["hashDepth"],
-                str(datetime.datetime.utcnow().isoformat()),
-                str(datetime.datetime.utcnow().isoformat()),
-            )
-
-        self.pending_changes = True
-
-    def get_entry(self, account, hostname):
-        if (len(self.data)) == 0:
-            return None
-        for entry in self.data.iterrows():
-            if entry[1]["username"] == account and entry[1]["hostname"] == hostname:
-                return entry[1]
+        index = 0
+        while index < len(self.data):
+            entry = self.data[index]
+            if (entry[self._cols["user"]] == account and entry[self._cols["host"]] == hostname):
+                break
+            index += 1
+        if index == len(self.data):
+            # If we're adding a new item, extend the list.
+            self.data.append(None) 
+        salt = base64.b64encode(
+            Random.new().read(self.settings["salt_size"])
+        ).decode("utf-8")
+        password = self._encrypt(
+            password,
+            self.settings["salt"],
+            salt,
+            self.settings["hashDepth"],
+        )
+        self.data[index] = {
+            self._cols["user"]   : account, 
+            self._cols["host"]   : hostname, 
+            self._cols["salt"]   : salt, 
+            self._cols["pass"]   : password, 
+            self._cols["depth"]  : self.settings["hashDepth"],
+            self._cols["mod"]    : str(datetime.datetime.utcnow().isoformat()),  
+            self._cols["create"] : str(datetime.datetime.utcnow().isoformat()),
+        }
+        self.data[index][self._cols["sum"]] = base64.b64encode(
+            hashlib.sha256(
+                str(self.data[index]).encode('utf-8')
+            ).digest()
+        )
+        
+    def get_entry(self, account:str, hostname:str):
+        for entry in self.data:
+            if entry[self._cols["user"]] == account and entry[self._cols["host"]] == hostname:
+                return entry
         return None
 
-    def search(self, filters):
-        search_results = self.data.copy()
-        for filter in filters:
-            search_results = search_results.loc[search_results[filter[0]].str.contains(filter[1])]
-        return search_results.filter(["username", "hostname", "dateModified"])
+    @staticmethod
+    def matchEntry(item:dict, column_name:str, search_value):
+        return str(search_value) in str(item[column_name])
+    @staticmethod
+    def onlyKeys(keys:Iterable[str], item: dict):
+        selectedValues = dict()
+        for key in keys:
+            selectedValues[key] = item.get(key)
+        return selectedValues
 
-    def get_password(self, account, hostname):
+    def search(self, filters:Iterable[tuple]):
+        search_results = self.data.copy()
+        for item in filters:
+            search_results = filter((lambda i: self.matchEntry(i, *item)), search_results)
+        return [*map(lambda x: self.onlyKeys(("username", "hostname", "dateModified"), x), search_results)]
+
+    def get_password(self, account:str, hostname:str):
         entry = self.get_entry(account, hostname)
         if entry and isinstance(entry["password"], str):
             return self._decrypt(

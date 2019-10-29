@@ -1,12 +1,4 @@
 argparse
-base64
-Crypto
-datetime
-hashlib
-io
-json
-os
 pandas
-re
-shlex
-sys
+PyCryptodome
+pyinstaller

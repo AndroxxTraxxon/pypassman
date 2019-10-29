@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import util
+import hashlib
 
 prompt_text  = "ppm >>> "
 
@@ -55,23 +56,35 @@ def update(args, database):
 
 def query(args, database):
   filters = []
-  if args.hostname:
+  if hasattr(args, 'hostname') and args.hostname:
     filters.append(("hostname", args.hostname))
-  if args.username:
+  if hasattr(args, 'username') and args.username:
     filters.append(("username", args.username))
   results = database.search(filters)
-  print(results)
+  util.print_dictrows(
+    results, 
+    (
+      'Username',
+      'Hostname',
+      'Date Modifed'
+    )
+  )
 
 def save(args, database):
-  password = util.get_master_password(args, verify=True)
   if args.filepath:
-    path = os.path.realpath(args.filepath)
+    password = util.get_master_password(args, verify=True)
+    path = os.path.realpath(os.path.expanduser(args.filepath))
     if (not os.path.exists(path)) or util.confirm_overwrite_file(path):
       database.save_as(path, password)
   elif database.path:
-    database.save(password)
+    password = util.get_master_password(args)
+    if args.sess_salt and hashlib.sha256((password + args.sess_salt).encode('utf-8')).digest() == args.pass_hash:
+      database.save(password)
+      print('Database saved at %s'%database.path)
+    else:
+      args.parser.error("\nPassword Mismatch: Please enter the same password, or specify a file path.")
   else:
-    args.parser.error("DATABASE SAVE PATH NOT DEFINED")
+    args.parser.error("\n Error: Database path unknown. Cannot save without file path. (-d/--dest)")
 
 def run(database, args, options = None):
   user_input = None
@@ -80,9 +93,14 @@ def run(database, args, options = None):
   while raw_user_input != "exit":
     try:
       user_input = shlex.split(raw_user_input)
-      args = session_parser.parse_args(user_input)
-      if args.func:
-        args.func(args, database)
+      sess_args = session_parser.parse_args(user_input)
+      if user_input[0] == 'save':
+        if hasattr(args, 'sess_salt'):
+          sess_args.sess_salt = args.sess_salt
+        if hasattr(args, 'pass_hash'):
+          sess_args.pass_hash = args.pass_hash
+      if sess_args.func:
+        sess_args.func(sess_args, database)
     except SessionParser.SessionError:
       print()
     raw_user_input = input(prompt_text)

@@ -1,5 +1,5 @@
 import getpass
-
+from typing import Iterable, Dict
 def _request_new_password(title=None):
   while True:
     first_password = None
@@ -29,5 +29,43 @@ def get_master_password(args, verify=False):
 def confirm_overwrite_file(filename):
   confirmation = None
   while not confirmation or confirmation.lower() not in ('y', 'n'):
-    confirmation = input("Are you sure you want to overwrite {}? (Y/n):".format(filename))
+    confirmation = input("Are you sure you want to overwrite {}?\n (Y/n):".format(filename)).lower()[0]
   return bool(confirmation == 'y')
+
+def print_dictrows(dictrows:Iterable[Dict], columns:Iterable[str] = None, empty_alt:str = 'Empty Table') -> None:
+  rows_to_print = list()
+  if dictrows:
+    if not columns:
+      columns = (x for x in dictrows[0].keys())
+    for row in dictrows:
+      _row = []
+      for value in row.values():
+        _row.append(value)
+      rows_to_print.append(_row)
+
+  else:
+    if not columns:
+      print('| %s |' % empty_alt)
+      return
+    rows_to_print.append(["Empty" for x in columns])
+  print_table(rows_to_print, headers=columns)
+
+def print_table(tableData:Iterable[list], headers = None):
+  if headers:
+    tableData.insert(0, (*headers, ))
+  colWidths = [0] * len(tableData[0])
+  for rowData in tableData:
+    for i, colItem in enumerate(rowData):
+      itemLength = len(colItem)
+      if itemLength > colWidths[i]:
+        colWidths[i] = itemLength      
+  numRows = len(tableData)
+  numCols = len(tableData[0])      
+  for rowIndex in range(numRows):
+    for colIndex in range(numCols):
+      print(tableData[rowIndex][colIndex].ljust(colWidths[colIndex]), end='  ')
+    print()
+    if headers and rowIndex == 0:
+      for colIndex in range(numCols):
+        print('_' * colWidths[colIndex], end ='__')
+      print()
