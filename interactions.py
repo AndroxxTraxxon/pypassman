@@ -6,6 +6,7 @@ import util
 import hashlib
 import base64
 from Crypto import Random
+import pyperclip
 
 def init(args):
     # check file path
@@ -31,22 +32,41 @@ def write_entry(args, update_only:bool = True):
     database = None
     try:
         database = passdb.PassDB.read_file(path, password)
-        entry = database.get_entry(args.username, args.hostname)
+        index, entry = database.get_entry(args.username, args.hostname)
         if update_only:
-            if entry is None:
-                args.parser.error("CANNOT UPDATE: ACCOUNT DOES NOT EXIST")
+            if index is None:
+                args.parser.error("Cannot update: account does not exist")
             else:
                 database.set_entry(args.username, args.hostname, util.get_user_password(args, account=args.username))
         else:
-            if entry is not None:
-                args.parser.error("CANNOT DEFINE: ACCOUNT ALREADY EXISTS")
-            else:
+            if index is None:
                 database.set_entry(args.username, args.hostname, util.get_user_password(args, account=args.username))
+            else:
+                args.parser.error("Cannot define: account already exists")
         database.save(password)
     except ValueError:
-        args.parser.error("INCORRECT PASSWORD")
+        args.parser.error("Incorrect Password")
     finally:
         print("Database saved at {}".format(database.path))
+
+def read(args):
+    path = os.path.realpath(os.path.expanduser(args.filepath))
+    if not os.path.exists(path):
+        args.parser.error("Error: File {} does not exist.".format(path))
+    password = util.get_master_password(args)
+    database = None
+    try:
+        database = passdb.PassDB.read_file(path, password)
+        if args.index:
+            if args:
+                pass
+        index, entry = database.get_entry(args.username, args.hostname)
+        password = database.get_password((index, entry))
+        util.print_pass_entry(index, entry)
+        pyperclip.copy('')
+    except ValueError:
+        args.parser.error("Incorrect Password")
+
 
 def define(args):
     write_entry(args, update_only=False)
@@ -69,7 +89,15 @@ def query(args):
         if hasattr(args, "username") and args.username:
             filters.append(("username", args.username))
         results = database.search(filters)
-        print(results)
+        util.print_dictrows(
+            results, 
+            (
+            ''
+            'Username',
+            'Hostname',
+            'Date Modifed'
+            )
+        )
         
     except ValueError:
         args.parser.error("INCORRECT PASSWORD")

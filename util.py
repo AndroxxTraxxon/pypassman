@@ -1,5 +1,32 @@
 import getpass
 from typing import Iterable, Dict
+
+_names_to_types = {
+  "int": int,
+  "str": str,
+  "float": float,
+  "bool": bool,
+  "Nonetype": type(None)
+}
+
+def get_type(typename:str):
+  return _names_to_types.get(typename) or typename
+
+_cols = {
+    "user"  : "username",
+    "host"  : "hostname",
+    "salt"  : "salt",
+    "pass"  : "password",
+    "grp"   : "group",
+    "depth" : "hashDepth",
+    "meta"  : "metadata",
+    "mod"   : "dateModified",
+    "create": "dateCreated",
+    "sum"   : "checksum",
+  }
+def column_names():
+  return _cols.copy()
+
 def _request_new_password(title=None):
   while True:
     first_password = None
@@ -56,16 +83,26 @@ def print_table(tableData:Iterable[list], headers = None):
   colWidths = [0] * len(tableData[0])
   for rowData in tableData:
     for i, colItem in enumerate(rowData):
-      itemLength = len(colItem)
+      itemLength = len(str(colItem))
       if itemLength > colWidths[i]:
         colWidths[i] = itemLength      
   numRows = len(tableData)
   numCols = len(tableData[0])      
   for rowIndex in range(numRows):
     for colIndex in range(numCols):
-      print(tableData[rowIndex][colIndex].ljust(colWidths[colIndex]), end='  ')
+      print(str(tableData[rowIndex][colIndex]).ljust(colWidths[colIndex]), end='  ')
     print()
     if headers and rowIndex == 0:
       for colIndex in range(numCols):
         print('_' * colWidths[colIndex], end ='__')
       print()
+
+def print_pass_entry(index: int, entry:dict):
+  output = {
+    "Index": index,
+    "Username"      : entry[_cols['user']],
+    "Hostname"      : entry[_cols['host']],
+    "Group"         : entry[_cols['grp']],
+    "Last Modified" : entry[_cols['mod']]
+  }
+  return print_dictrows([output])

@@ -9,6 +9,8 @@ import datetime
 import os
 from io import StringIO
 from typing import Iterable
+import util
+import copy
 
 __version__ = '0.0.1'
 
@@ -23,17 +25,7 @@ class PassDB:
         "path": None,
         "hashDepth": 9,
     }
-    _cols = {
-        "user"  : "username",
-        "host"  : "hostname",
-        "salt"  : "salt",
-        "pass"  : "password",
-        "grp"   : "group",
-        "depth" : "hashDepth",
-        "mod"   : "dateModified",
-        "create": "dateCreated",
-        "sum"   : "checksum",
-    }
+    _cols = util.column_names()
     
     _format = """### PYPASSMAN Version {version} ###
 {settings}
@@ -92,7 +84,9 @@ class PassDB:
                 self._cols["host"]: entry[self._cols["host"]],
                 self._cols["salt"]: new_password_salt,
                 self._cols["pass"]: encrypted_password,
+                self._cols["grp"] : entry.get(self._cols["grp"], ""),
                 self._cols["depth"]: self.settings["hashDepth"],
+                self._cols["meta"]: entry.get(self._cols["meta"], "{}"),
                 self._cols["mod"]: str(datetime.datetime.utcnow().isoformat()),
                 self._cols["create"]: entry[self._cols["create"]],
             }
@@ -140,7 +134,6 @@ class PassDB:
     def save_as(self, path, password):
         path = os.path.realpath(os.path.expanduser(path))
         settings_cp = self.settings.copy()
-        settings_cp["path"] = path
         new_dict = self.__class__(
             data=self.data,
             path=path,
@@ -231,20 +224,18 @@ class PassDB:
         )
 
     def __str__(self):
-        path = self.settings["path"]
-        return "PassDB <{}{}>".format(
+        
+        path = self.path or 'Untitled'
+        return "{} <{}{}>".format(
+            self.__class__.__name__,
             "{} entr{}".format(
                 len(self.data),
                 "y" if len(self.data) == 1 else "ies"
-                )
-            if len(self.data) > 0
-            else "Empty",
-            " at {}'{}'".format("*" if self.pending_changes else "", path)
-            if path is not None
-            else "",
+            ) if len(self.data) > 0 else "Empty",
+            " at {}'{}'".format( "*" if self.pending_changes else "",  path),
         )
 
-    def set_entry(self, account, hostname, password):
+    def set_entry(self, account, hostname, password, group = "", meta = ""):
         index = 0
         while index < len(self.data):
             entry = self.data[index]
@@ -267,8 +258,10 @@ class PassDB:
             self._cols["user"]   : account, 
             self._cols["host"]   : hostname, 
             self._cols["salt"]   : salt, 
-            self._cols["pass"]   : password, 
+            self._cols["pass"]   : password,
+            self._cols["grp"]    : group or '',
             self._cols["depth"]  : self.settings["hashDepth"],
+            self._cols["meta"]   : meta,
             self._cols["mod"]    : str(datetime.datetime.utcnow().isoformat()),  
             self._cols["create"] : str(datetime.datetime.utcnow().isoformat()),
         }
@@ -277,16 +270,20 @@ class PassDB:
                 str(self.data[index]).encode('utf-8')
             ).digest()
         )
-        
+
+    def get_entry_by_index(self, index:int):
+        return self.data[index].copy()
+
     def get_entry(self, account:str, hostname:str):
-        for entry in self.data:
+        for index, entry in enumerate(self.data):
             if entry[self._cols["user"]] == account and entry[self._cols["host"]] == hostname:
-                return entry
-        return None
+                return index, entry.copy()
+        return None, None
 
     @staticmethod
     def matchEntry(item:dict, column_name:str, search_value):
         return str(search_value) in str(item[column_name])
+        
     @staticmethod
     def onlyKeys(keys:Iterable[str], item: dict):
         selectedValues = dict()
@@ -295,13 +292,16 @@ class PassDB:
         return selectedValues
 
     def search(self, filters:Iterable[tuple]):
-        search_results = self.data.copy()
+        search_results = copy.deepcopy(self.data)
+        for index, result in enumerate(search_results):
+            # putting Line numbers ONLY the search results
+            result['index'] = index
         for item in filters:
             search_results = filter((lambda i: self.matchEntry(i, *item)), search_results)
-        return [*map(lambda x: self.onlyKeys(("username", "hostname", "dateModified"), x), search_results)]
+        return [*map(lambda x: self.onlyKeys(('index', self._cols['user'], self._cols['host'], self._cols['grp'], self._cols['mod']), x), search_results)]
 
-    def get_password(self, account:str, hostname:str):
-        entry = self.get_entry(account, hostname)
+    def get_password(self, row):
+        entry = row[1]
         if entry and isinstance(entry["password"], str):
             return self._decrypt(
                 entry["password"],
