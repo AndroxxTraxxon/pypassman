@@ -139,7 +139,7 @@ def run(database, args, options = None):
     try:
       user_input = shlex.split(raw_user_input)
       sess_args = session_parser.parse_args(user_input)
-      if user_input[0] in ('save', 'close'):
+      if user_input and user_input[0] in ('save', 'close'):
         if hasattr(args, 'sess_salt'):
           sess_args.sess_salt = args.sess_salt
         if hasattr(args, 'pass_hash'):
@@ -150,7 +150,7 @@ def run(database, args, options = None):
         if flag in user_input:
           help_flag = True
           break
-      if not help_flag and sess_args.func:
+      if not help_flag and sess_args.func and callable(sess_args.func):
         sess_args.func(sess_args, database)
     except SessionParser.SessionError:
       print()
